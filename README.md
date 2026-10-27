@@ -22,9 +22,16 @@ The [raw data](https://divvy-tripdata.s3.amazonaws.com/index.html), stripped of 
 - SQL (BigQuery)
 - Tableau
 
+### Secondary Tools
+- Python
+- Google Sheets
+
+## Analysis Summary
+
 ## Supporting Visualizations
 
 ## Recommendations
+
 
 ### Limitations
 
