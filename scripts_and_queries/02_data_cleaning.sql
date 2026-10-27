@@ -84,7 +84,8 @@ FROM `cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic`;
 
 
 
---Step 3: Determine number of duplicate records
+--Step 3: Check for duplicate records
+--Determine number of duplicate records
 SELECT ride_id, COUNT(ride_id)
 FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
 GROUP BY ride_id
@@ -114,15 +115,15 @@ CREATE OR REPLACE TABLE cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclis
 
 --Remove duplicate rides
 CREATE OR REPLACE TABLE cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic AS (
-SELECT * EXCEPT(row_num)
-FROM (
-  SELECT *,
-  ROW_NUMBER() OVER (
-    PARTITION BY ride_id
-  ) as row_num
-  FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
-)
-WHERE row_num = 1
+    SELECT * EXCEPT(row_num)
+    FROM (
+      SELECT *,
+      ROW_NUMBER() OVER (
+        PARTITION BY ride_id
+      ) as row_num
+      FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
+    )
+    WHERE row_num = 1
 );
 
 
@@ -143,7 +144,7 @@ ORDER BY start_station_id, start_station_name;
 
 
 --Step 5: Assign nearest station within reason as the station id to fill nulls
---Step 5a: Decide on the appropriate distance from the station average that should still belong to the station
+--Decide on the appropriate distance from the station average that should still belong to the station
 WITH station_avgs AS (
   SELECT 
     start_station_id,
@@ -236,7 +237,7 @@ nearest_station AS (
     locs.start_lng,
     ST_DISTANCE(ST_GEOGPOINT(locs.start_lng, locs.start_lat), station_point) AS distance
   FROM distinct_missing_locs locs
-  CROSS JOIN station_avgs s --CROSS JOIN to compare each unique coordinate to every station's average point
+  CROSS JOIN station_avgs s ---CROSS JOIN compares each coordinate to all station average points
   QUALIFY ROW_NUMBER() OVER (
     PARTITION BY locs.location_id --Cannot partition by a float (start_lat or start_lng)
     ORDER BY ST_DISTANCE(ST_GEOGPOINT(locs.start_lng, locs.start_lat), s.station_point) ASC
@@ -267,66 +268,75 @@ ORDER BY 1;
 
 
 
---Step 5b: Fill null station ids within 50 meters of a station with that station's average
+--Create a backup table as a safety measure
+CREATE OR REPLACE TABLE cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic_backup_v2 AS (
+  SELECT *
+  FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
+);
+
+
+
+--Fill null station ids within 50 meters of a station with that station's average coordinate
 CREATE OR REPLACE TABLE cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic AS (
-WITH station_avgs AS (
-  SELECT
-    start_station_id,
-    start_station_name,
-    ST_GEOGPOINT(AVG(start_lng), AVG(start_lat)) AS station_point
-  FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
-  WHERE start_station_id IS NOT NULL
-    AND start_lat IS NOT NULL
-    AND start_lng IS NOT NULL
-  GROUP BY start_station_id, start_station_name
-), --Calculate the average from each station where there are no null coordinates
-
-distinct_missing_locs AS (
-  SELECT
-    ROW_NUMBER() OVER() AS location_id, --Needed for partitioning in the next CTE
-    start_lat,
-    start_lng
-  FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
-  WHERE start_station_id IS NULL
-    AND start_lat IS NOT NULL
-    AND start_lng IS NOT NULL
-  GROUP BY start_lat, start_lng
-), --Group rides with null stations by coordinate so the query executes faster and more efficiently
-
-nearest_station AS (
-  SELECT
-    locs.start_lat,
-    locs.start_lng,
-    s.start_station_id AS matched_station_id,
-    s.start_station_name AS matched_station_name,
-    ST_DISTANCE(ST_GEOGPOINT(locs.start_lng, locs.start_lat), s.station_point) AS distance
-  FROM distinct_missing_locs locs
-  CROSS JOIN station_avgs s --CROSS JOIN to compare each unique coordinate to every station's average point
-  QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY locs.location_id
-    ORDER BY ST_DISTANCE(ST_GEOGPOINT(locs.start_lng, locs.start_lat), s.station_point) ASC
-  ) = 1 --QUALIFY kept only the station whose average is nearest to each coordinate (rank 1)
-)
-
-SELECT
-  t.* EXCEPT(start_station_id, start_station_name),
-  COALESCE(
-    t.start_station_id, --Keep station ids already filled
-    IF(n.distance <= 50, n.matched_station_id, NULL)
-  ) AS start_station_id, --Leave null if the distance is more than 50 meters
-  COALESCE(
-    t.start_station_name, --Keep station names already filled
-    IF(n.distance <= 50, n.matched_station_name, NULL)
-  ) AS start_station_name --Leave null if the distance is more than 50 meters
-FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic t
-LEFT JOIN nearest_station n
-  ON t.start_lat = n.start_lat
- AND t.start_lng = n.start_lng
+    WITH station_avgs AS (
+      SELECT
+        start_station_id,
+        start_station_name,
+        ST_GEOGPOINT(AVG(start_lng), AVG(start_lat)) AS station_point
+      FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
+      WHERE start_station_id IS NOT NULL
+        AND start_lat IS NOT NULL
+        AND start_lng IS NOT NULL
+      GROUP BY start_station_id, start_station_name
+    ), --Calculate the average from each station where there are no null coordinates
+    
+    distinct_missing_locs AS (
+      SELECT
+        ROW_NUMBER() OVER() AS location_id, --Needed for partitioning in the next CTE
+        start_lat,
+        start_lng
+      FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
+      WHERE start_station_id IS NULL
+        AND start_lat IS NOT NULL
+        AND start_lng IS NOT NULL
+      GROUP BY start_lat, start_lng
+    ), --Group rides with null stations by coordinate so the query executes faster and more efficiently
+    
+    nearest_station AS (
+      SELECT
+        locs.start_lat,
+        locs.start_lng,
+        s.start_station_id AS matched_station_id,
+        s.start_station_name AS matched_station_name,
+        ST_DISTANCE(ST_GEOGPOINT(locs.start_lng, locs.start_lat), s.station_point) AS distance
+      FROM distinct_missing_locs locs
+      CROSS JOIN station_avgs s --CROSS JOIN compares each coordinate to all station average points
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY locs.location_id
+        ORDER BY ST_DISTANCE(ST_GEOGPOINT(locs.start_lng, locs.start_lat), s.station_point) ASC
+      ) = 1 --QUALIFY kept only the station whose average is nearest to each coordinate (rank 1)
+    )
+    
+    SELECT
+      t.* EXCEPT(start_station_id, start_station_name),
+      COALESCE(
+        t.start_station_id, --Keep station ids already filled
+        IF(n.distance <= 50, n.matched_station_id, NULL)
+      ) AS start_station_id, --Leave null if the distance is more than 50 meters
+      COALESCE(
+        t.start_station_name, --Keep station names already filled
+        IF(n.distance <= 50, n.matched_station_name, NULL)
+      ) AS start_station_name --Leave null if the distance is more than 50 meters
+    FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic t
+    LEFT JOIN nearest_station n
+       ON t.start_lat = n.start_lat
+       AND t.start_lng = n.start_lng
 );
 
 
 
 --Step 6: Identify any problems in ride duration
+--Checking duration buckets to understand the breakdown
 WITH time_data AS (
     SELECT ROUND(TIMESTAMP_DIFF(ended_at, started_at, minute),0) AS ride_duration
     FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
@@ -349,7 +359,8 @@ GROUP BY 1
 ORDER BY 2;
 
 
-    
+
+--Compare null station id count to rides over 12 hours count
 WITH time_data AS (
     SELECT
     start_station_id,
@@ -359,7 +370,7 @@ WITH time_data AS (
     WHERE started_at IS NOT NULL AND ended_at IS NOT NULL
     ) --Calculate ride duration
     
-SELECT --Compare null station id count to rides over 12 hours count
+SELECT
     COUNTIF(start_station_id IS NULL) AS start_nulls,
     COUNTIF(end_station_id IS NULL) AS end_nulls,
     COUNT(*) AS rides_over_12_hours
@@ -368,6 +379,7 @@ WHERE ride_duration > 720;
 
 
 
+ --Compare null station id count to rides over 24 hours count
 WITH time_data AS (
     SELECT
     start_station_id,
@@ -377,7 +389,7 @@ WITH time_data AS (
     WHERE started_at IS NOT NULL AND ended_at IS NOT NULL
     ) --Calculate ride duration
     
-SELECT --Compare null station id count to rides over 24 hours count
+SELECT
     COUNTIF(start_station_id IS NULL) AS start_nulls,
     COUNTIF(end_station_id IS NULL) AS end_nulls,
     COUNT(*) AS rides_over_12_hours
@@ -386,6 +398,7 @@ WHERE ride_duration > 1440;
 
 
 
+ --Check whether the stations changed on extremely short rides
 WITH time_data AS (
     SELECT
     start_station_id,
@@ -395,7 +408,7 @@ WITH time_data AS (
     WHERE started_at IS NOT NULL AND ended_at IS NOT NULL
 ) --Calculate ride duration
     
-SELECT --Check whether the stations changed on extremely short rides
+SELECT
   COUNT(*) AS ct
 FROM time_data
 WHERE ride_duration > 0 AND ride_duration < 2
@@ -403,6 +416,7 @@ WHERE ride_duration > 0 AND ride_duration < 2
 
 
 
+--When station did not change, was there any difference between members and casuals?
 WITH time_data AS (
     SELECT
     start_station_id,
@@ -413,7 +427,7 @@ WITH time_data AS (
     WHERE started_at IS NOT NULL AND ended_at IS NOT NULL
     ) --Calculate ride duration
     
-SELECT --When station did not change, was there any difference between members and casuals?
+SELECT
   member_casual,
   COUNT(*) AS ct
 FROM time_data
@@ -440,60 +454,69 @@ WHERE
   CASE
     WHEN ride_duration > 0 AND ride_distance/ride_duration > 8.5 AND rideable_type = 'classic_bike' THEN 1
     WHEN ride_duration > 0 AND ride_distance/ride_duration > 11 AND rideable_type = 'electric_bike' THEN 1
-    ELSE 0
+    ELSE 0 --electric bikes have pedal assist which makes high speeds easier to maintain
   END = 1;
 
 
 
----Step 8: Filter out
-CREATE OR REPLACE TABLE `cyclistic-500415.Cyclistic_Ride_Data.cleaned_combined_Cyclistic` AS (
+---Step 8: Add ride duration, month, day of week, distance, and average velocity columns.
+--Also, filter out rides with durations or speeds that are unrealistic for a real ride
 
-WITH trips AS (
-SELECT
-  ride_id,
-  rideable_type,
-  started_at,
-  ended_at,
-  ROUND(TIMESTAMP_DIFF(ended_at, started_at, SECOND) / 60.0, 2) AS ride_duration_minutes,
-  EXTRACT(MONTH FROM started_at) AS month,
-  EXTRACT(DAYOFWEEK FROM started_at) AS day_of_week,
-  start_station_name,
-  start_station_id,
-  end_station_name,
-  end_station_id,
-  start_lat,
-  start_lng,
-  end_lat,
-  end_lng,
-  ST_DISTANCE(
-    ST_GEOGPOINT(start_lng, start_lat),
-    ST_GEOGPOINT(end_lng, end_lat)
-  ) AS distance_meters,
-  ST_DISTANCE(
-    ST_GEOGPOINT(start_lng, start_lat),
-    ST_GEOGPOINT(end_lng, end_lat)
-  ) / NULLIF(TIMESTAMP_DIFF(ended_at, started_at, SECOND),0) AS avg_velocity_m_per_s,
-  member_casual
-FROM `cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic`
-WHERE end_lat IS NOT NULL AND end_lng IS NOT NULL
-)
-    
-SELECT *
-FROM trips
-WHERE ride_duration_minutes > 0
-  AND CASE
-      WHEN ride_duration_minutes <= 2
-        AND distance_meters > 50 THEN 1
-      WHEN ride_duration_minutes <= 2
-        AND COALESCE(start_station_id, 'A') != COALESCE(end_station_id, 'B') THEN 1
-      WHEN ride_duration_minutes > 2 THEN 1
-      ELSE 0
-    END = 1
-  AND CASE
-      WHEN rideable_type = 'classic_bike'
-        AND avg_velocity_m_per_s < 8.5 THEN 1
-      WHEN rideable_type = 'electric_bike'
-        AND avg_velocity_m_per_s < 11 THEN 1
-      ELSE 0
-    END = 1
+--Create a backup table as a safety measure
+CREATE OR REPLACE TABLE cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic_backup_v3 AS (
+  SELECT *
+  FROM cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic
+);
+
+
+
+CREATE OR REPLACE TABLE `cyclistic-500415.Cyclistic_Ride_Data.cleaned_combined_Cyclistic` AS (
+    WITH trips AS (
+        SELECT
+          ride_id,
+          rideable_type,
+          started_at,
+          ended_at,
+          ROUND(TIMESTAMP_DIFF(ended_at, started_at, SECOND) / 60.0, 2) AS ride_duration_minutes,
+          EXTRACT(MONTH FROM started_at) AS month,
+          EXTRACT(DAYOFWEEK FROM started_at) AS day_of_week,
+          start_station_name,
+          start_station_id,
+          end_station_name,
+          end_station_id,
+          start_lat,
+          start_lng,
+          end_lat,
+          end_lng,
+          ST_DISTANCE(
+            ST_GEOGPOINT(start_lng, start_lat),
+            ST_GEOGPOINT(end_lng, end_lat)
+          ) AS distance_meters,
+          ST_DISTANCE(
+            ST_GEOGPOINT(start_lng, start_lat),
+            ST_GEOGPOINT(end_lng, end_lat)
+          ) / NULLIF(TIMESTAMP_DIFF(ended_at, started_at, SECOND),0) AS avg_velocity_m_per_s,
+          member_casual
+        FROM `cyclistic-500415.Cyclistic_Ride_Data.raw_combined_Cyclistic`
+        WHERE end_lat IS NOT NULL AND end_lng IS NOT NULL
+    ) --Create the new columns
+        
+    SELECT *
+    FROM trips
+    WHERE ride_duration_minutes > 0 --No negative durations
+      AND CASE
+          WHEN ride_duration_minutes <= 2
+            AND distance_meters > 50 THEN 1
+          WHEN ride_duration_minutes <= 2
+            AND COALESCE(start_station_id, 'A') != COALESCE(end_station_id, 'B') THEN 1
+          WHEN ride_duration_minutes > 2 THEN 1
+          ELSE 0
+        END = 1 --If durations <= 2 min, needs to travel 50 meters or change station
+      AND CASE
+          WHEN rideable_type = 'classic_bike'
+            AND avg_velocity_m_per_s < 8.5 THEN 1
+          WHEN rideable_type = 'electric_bike'
+            AND avg_velocity_m_per_s < 11 THEN 1
+          ELSE 0
+        END = 1 --Speeds should be reasonable for an average velocity
 );
