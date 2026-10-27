@@ -615,6 +615,7 @@ WHERE ride_duration > 0 AND ride_duration < 2
 ```
 
 ```sql
+--When station did not change, was there any difference between members and casuals?
 WITH time_data AS (
     SELECT
         start_station_id,
