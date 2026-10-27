@@ -1,5 +1,8 @@
-```python
-# 6 files were too large to uplaod directly to BigQuery (>100 MB) and needed to be chunked
+# ====================================================================
+# PROJECT: Ride-Share-Membership-Growth-Marketing-Analysis
+# FILE:    01_data_preprocessing_and_chunking.py
+# PURPOSE: Chunk csv files > 100 Mb for upload into BigQuery
+# ====================================================================
     
 # import package and alias
 import pandas as pd
@@ -51,4 +54,3 @@ for i in range(0, len(df_2026_05), chunk_size):
     chunk = df_2026_05.iloc[i:i + chunk_size]
     chunk.to_csv("2026_05_Cyclistic_Data_pt_" + str(count) + ".csv", index=False)
     count += 1
-```
