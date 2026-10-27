@@ -1,9 +1,9 @@
--- ====================================================================
+-- ================================================================================
 -- PROJECT: Ride-Share-Membership-Growth-Marketing-Analysis
 -- FILE:    02_data_cleaning.sql
--- PURPOSE: Remove duplicates, standardize strings, and handle nulls
+-- PURPOSE: Remove duplicates, standardize strings, handle nulls, and check sanity
 -- WAREHOUSE: Google BigQuery
--- ====================================================================
+-- ================================================================================
 
 
 --Step 1: Combine the individual files into a single table
