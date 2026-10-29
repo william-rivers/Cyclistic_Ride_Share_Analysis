@@ -23,6 +23,16 @@ GROUP BY member_casual;
 
 
 
+--Find percent of the total rides that were roundtrips split by user type
+SELECT
+  member_casual,
+  ROUND(COUNT(CASE WHEN distance_meters = 0 THEN member_casual END)
+    / NULLIF(COUNT(member_casual), 0) * 100, 2) AS pct_rnd_trip,
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY member_casual;
+
+
+
 --Summary statistics for ride duration by user type
 SELECT
   member_casual,
@@ -169,7 +179,10 @@ SELECT
   ROUND(AVG(
     CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
   ), 2) AS avg_duration, --Exclude durations > 24 hours
-  ROUND(AVG(distance_meters), 2) AS avg_distance
+  ROUND(AVG(distance_meters), 2) AS avg_distance,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN avg_velocity_m_per_s END
+  ), 2) AS avg_velocity --Exclude durations > 24 hours
 FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
 GROUP BY day_of_week, member_casual
 ORDER BY day_of_week, member_casual;
@@ -178,16 +191,233 @@ ORDER BY day_of_week, member_casual;
 
 --Step 4: Time of Day Analysis
 
---Determine the most popular days for members and casuals
---Identify any duration or distance differences between them
+--Identify the most popular weekday time buckets and ride characteristics for each group
 SELECT
   member_casual,
-  day_of_week,
+  CASE
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 6 AND 8 THEN '1) Morning Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 9 AND 10 THEN '2) Mid-Morning'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 11 AND 12 THEN '3) Lunch Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 13 AND 15 THEN '4) Mid-Afternoon'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 16 AND 17 THEN '5) Evening Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 18 AND 21 THEN '6) Late Evening'
+    ELSE '7) Night'
+  END AS time_of_day,
   COUNT(ride_id) AS ct,
+  ROUND(COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY member_casual) * 100, 2) AS pct_of_group_ct, --percent of casuals or members
   ROUND(AVG(
     CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
   ), 2) AS avg_duration, --Exclude durations > 24 hours
-  ROUND(AVG(distance_meters), 2) AS avg_distance
+  ROUND(AVG(distance_meters), 2) AS avg_distance,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN avg_velocity_m_per_s END
+  ), 2) AS avg_velocity --Exclude durations > 24 hours
 FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
-GROUP BY day_of_week, member_casual
-ORDER BY day_of_week, member_casual;
+WHERE day_of_week BETWEEN 2 AND 6 --Weekdays only
+GROUP BY member_casual, time_of_day
+ORDER BY member_casual, time_of_day;
+
+
+
+--Identify most popular weekend time buckets and ride characteristics for each group
+SELECT
+  member_casual,
+  CASE
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 6 AND 8 THEN '1) Morning Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 9 AND 10 THEN '2) Mid-Morning'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 11 AND 12 THEN '3) Lunch Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 13 AND 15 THEN '4) Mid-Afternoon'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 16 AND 17 THEN '5) Evening Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 18 AND 21 THEN '6) Late Evening'
+    ELSE '7) Night'
+  END AS time_of_day,
+  COUNT(ride_id) AS ct,
+  ROUND(COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY member_casual) * 100, 2) AS pct_of_group_ct, --percent of casuals or members
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
+  ), 2) AS avg_duration,
+  ROUND(AVG(distance_meters), 2) AS avg_distance,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN avg_velocity_m_per_s END
+  ), 2) AS avg_velocity
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE day_of_week = 1 OR day_of_week = 7 --Weeknds only
+GROUP BY member_casual, time_of_day
+ORDER BY member_casual, time_of_day;
+
+
+
+--Step 5: Bike Type Analysis
+
+--Overall rideable type breakdown by user type
+SELECT
+  member_casual,
+  rideable_type,
+  ROUND(
+    COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY member_casual) * 100, 2
+  ) AS pct_of_group_ct, --percent of rideable type for each user type
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY member_casual, rideable_type
+ORDER BY member_casual, rideable_type;
+
+
+
+--Season-by-season rideable type breakdown by user type
+WITH season_data AS (
+  SELECT
+    CASE WHEN month BETWEEN 3 AND 5 THEN '1) Spring'
+      WHEN month BETWEEN 6 AND 8 THEN '2) Summer'
+      WHEN month BETWEEN 9 AND 10 THEN '3) Autumn'
+      ELSE '4) Winter'
+    END AS season,
+    member_casual,
+    rideable_type
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+) --Create the season column for display and partitioning
+
+SELECT
+  *,
+  ROUND(
+    COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY season, member_casual) * 100, 2
+  ) AS pct_of_group_ct, --percent of rideable type for each user type in the given season
+FROM season_data
+GROUP BY season, member_casual, rideable_type
+ORDER BY season, member_casual, rideable_type;
+
+
+
+--Step 6: Station Analysis
+
+--Determine the most used stations for each user type
+SELECT
+    member_casual,
+    station_id,
+    COUNT(*) AS num_rides,
+    DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+FROM (
+    SELECT member_casual, start_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE start_station_id IS NOT NULL
+    UNION ALL
+    SELECT member_casual, end_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE end_station_id IS NOT NULL
+) --Group start and end station data
+GROUP BY member_casual, station_id
+QUALIFY station_rk <= 10 --Keep only top 10 from the window function;
+
+
+
+--Display top 10 for casuals and members along with their corresponding rank for the other group
+WITH all_rk AS (
+  SELECT
+    member_casual,
+    station_id,
+    COUNT(*) AS num_rides,
+    DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+  FROM (
+    SELECT member_casual, start_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE start_station_id IS NOT NULL
+    UNION ALL
+    SELECT member_casual, end_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE end_station_id IS NOT NULL
+  ) --Group start and end station data
+  GROUP BY member_casual, station_id
+), --Build the full list of casual and member ranks
+
+split_rk AS (
+  SELECT
+    station_id,
+    MAX(CASE WHEN member_casual = 'casual' THEN station_rk END) AS casual_rk,
+    MAX(CASE WHEN member_casual = 'casual' THEN num_rides END) AS casual_rides,
+    MAX(CASE WHEN member_casual = 'member' THEN station_rk END) AS member_rk,
+    MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
+  FROM all_rk
+  GROUP BY station_id
+) --Split the member and casual station ranks so both can be displayed
+
+SELECT --Build Casual Top 10 List
+  'Casual Top 10' as list,
+  station_id,
+  casual_rk,
+  casual_rides,
+  member_rk,
+  member_rides
+FROM split_rk
+WHERE casual_rk <= 10
+UNION ALL
+SELECT --Build Member Top 10 List
+  'Member Top 10' as list,
+  station_id,
+  casual_rk,
+  casual_rides,
+  member_rk,
+  member_rides
+FROM split_rk
+WHERE member_rk <= 10
+ORDER BY
+  CASE WHEN list = 'Casual Top 10' THEN 1 ELSE 2 END, --Put casual list first
+  CASE WHEN list = 'Casual Top 10' THEN casual_rk ELSE member_rk END --Order each list by rank;
+
+
+
+--Identify any stations that fall into both group's top 50 and are member dominated
+--This table will be saved and used to generate a map of these stations' locations 
+WITH src AS (
+  SELECT member_casual, start_station_id AS station_id, start_lat AS lat, start_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE start_station_id IS NOT NULL
+  UNION ALL
+  SELECT member_casual, end_station_id AS station_id, end_lat AS lat, end_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE end_station_id IS NOT NULL
+), --Combine start and end station data together
+
+all_rk AS (
+  SELECT
+    member_casual,
+    station_id,
+    COUNT(*) AS num_rides,
+    DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) AS station_rk
+  FROM src
+  GROUP BY member_casual, station_id
+), --Build the full list of casual and member ranks
+
+split_rk AS (
+  SELECT
+    station_id,
+    MAX(CASE WHEN member_casual = 'casual' THEN station_rk END) AS casual_rk,
+    MAX(CASE WHEN member_casual = 'casual' THEN num_rides END) AS casual_rides,
+    MAX(CASE WHEN member_casual = 'member' THEN station_rk END) AS member_rk,
+    MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
+  FROM all_rk
+  GROUP BY station_id
+), --Split the member and casual station ranks so both can be displayed
+
+geo AS (
+  SELECT
+    station_id,
+    ROUND(AVG(lat), 4) AS lat,
+    ROUND(AVG(lng), 4) AS lng
+  FROM src
+  GROUP BY station_id
+) --Find the average coordinate for each station
+
+SELECT --Build list of high ROI stations
+  s.station_id,
+  g.lat,
+  g.lng,
+  s.casual_rk,
+  s.casual_rides,
+  s.member_rk,
+  s.member_rides,
+  ROUND(s.member_rides/s.casual_rides, 2) AS mem_cas_ratio
+FROM split_rk s
+LEFT JOIN geo g
+  ON s.station_id = g.station_id
+WHERE s.casual_rk <= 50
+  AND s.member_rk <= 50
+  AND s.member_rides > s.casual_rides --Member dominated
+ORDER BY mem_cas_ratio DESC --Highest difference first;
