@@ -545,8 +545,11 @@ ORDER BY 2;
 | Zero duration        | 161323       |
 | Within 1 hour        | 5438617      |
 
-I suspect that most of the trips over 12 hours are rides where the bikes were left at locations that were 
-not a station and that the duration may not represent the actual time that the client left the bike.
+The negative durations must be equipment malfunction and the zero durations might be bike docking errors 
+that rounded down. Regardless, this deserves additional investigation in the future as there appears to be 
+a breakdown in the data collection process. I am surprised by the several thousand rides over 12 hours long 
+and suspect that most of them are rides where the bikes were left at locations that were not a station and 
+that the duration may not represent the actual time that the client left the bike. 
 
 ```sql
 --Compare null station id count to rides over 12 hours count
@@ -653,7 +656,9 @@ allows riders to more easily maintain a high speed but that it cuts off at 20 mp
 pedestrians, red lights, hills, wind, etc. all lower the maximum safe speed of the bike. Finally, I am using 
 straight line distance between the start and end points because I do not have access to route data. The true 
 speed would be even higher given that the true distance is higher than the straight line distance. I decided 
-to establish a cutoff of 11 m/s (24.6 mph) for e-bikes and 8.5 m/s (19.0 mph) for standard bikes.
+to establish a cutoff of 11 m/s (24.6 mph) for e-bikes and 8.5 m/s (19.0 mph) for standard bikes. I still find 
+it unlikely that cyclists manage to maintain those speeds as an average, but don't want to remove rides in more 
+open areas like parks where riders might be able to maintain high speeds.
 
 ```sql
 --Identify any issues related to how quickly bikes traveled during the ride
@@ -679,7 +684,8 @@ WHERE
 
 I identified 26,069 rides that needed to be excluded from the cleaned data for being unreasonably fast. The most 
 likely cause for this is GPS drift on very short trips, equipment malfunction, or the bikes being transported to 
-another station (or repair facility) by motor vehicle.
+another station (or repair facility) by motor vehicle. This deserves additional investigation in the future as 
+there appears to be a breakdown in the data collection process.
 
 I created a new table called cleaned_combined_ride_share with 4 new columns called ride_duration_minutes, 
 day_of_week, month, and distance_meters. I filtered out rides with a duration 0 minutes or less, rides with a 
@@ -776,6 +782,26 @@ I assumed that casuals would be more likely to take roundtrips which would make 
 quartile more heavily. That appears not to be the case. If the bikes had some form of odometer, this data 
 would be much more helpful and informative. Using straight line distance between the start and stop 
 coordinate provides very little context for the trip.
+
+```sql
+--Find percent of the total rides that were roundtrips split by user type
+SELECT
+  member_casual,
+  ROUND(COUNT(CASE WHEN distance_meters = 0 THEN member_casual END)
+    / NULLIF(COUNT(member_casual), 0) * 100, 2) AS pct_rnd_trip,
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY member_casual;
+```
+
+| member_casual | pct_rnd_trip |
+|---------------|--------------|
+| casual        | 9.04         |
+| member        | 3.33         |
+
+After seeing that there wasn't an obvious distance difference, I wanted to know if I was right about causals 
+making roundtrips more often. The results show that casuals are more likely to take round trips than members. 
+However, the percentage of round trips was low for both so it is unlikely to help identify casuals behaving
+similarly to members.
 
 ```sql
 --Summary statistics for ride duration by user type
@@ -1038,7 +1064,12 @@ months. Generally, members averaged a slightly greater distance on their trips. 
 difference was higher at around 200 meters and the gap shrank to less than 100 meters during the summer 
 indicating that members show less variation as temperature changes.
 
-There are two marketing seasons according to this information. Between May and August, there is much higher casual activity and therefore more people available for conversion. However, these users are not displaying "member-like" behavior for the most part. Between December and February, there is low casual activity but the casuals that stick around demonstrate behavior much more consistent with members. The more utilitarian use is likely forced by the weather but the fact that they are still using the bikes at all indicates they would benefit from a membership.
+There are two marketing seasons according to this information. Between May and August, there is much higher 
+casual activity and therefore more people available for conversion. However, these users are not displaying 
+"member-like" behavior for the most part. Primarily target the users behaving most like members. For others, 
+emphasize the potential savings at even relatively light use. Between December and February, there is low 
+casual activity but the casuals that stick around demonstrate behavior much more consistent with members and 
+the fact that they are still using the bikes at all indicates they are likely to value the membership highly.
 
 ### 4.3 Day of Week Analysis
 
@@ -1075,6 +1106,475 @@ ORDER BY day_of_week, member_casual;
 | member        | 6           | 541762 | 12.1         | 2211.93      | 3.45          |
 | member        | 7           | 462897 | 13.33        | 2344.73      | 3.35          |
 
-With Sunday-Saturday as 1-7, we can see that members and casuals follow opposite patterns. Casuals favor rides on the weekend with a particular focus on Saturdays. Member take more rides on weekdays with Wednesdays being the peak day. In both members and casuals, the average duration and distance peak on the weekend and show a mild elevation on Mondays and Fridays as compared to other weekdays. The member rides show a very slight decrease in the average velocity on the weekend whereas the weekend decrease is more pronounced in casual rides.
+With Sunday-Saturday as 1-7, we can see that members and casuals follow opposite patterns. Casuals favor 
+rides on the weekend with a particular focus on Saturdays. Member take more rides on weekdays with 
+Wednesdays being the peak day. In both members and casuals, the average duration and distance peak on the 
+weekend and show a mild elevation on Mondays and Fridays as compared to other weekdays. The member rides 
+show a very slight decrease in the average velocity on the weekend whereas the weekend decrease is more 
+pronounced in casual rides.
 
 ### 4.4 Time of Day Analysis
+
+It is very likely that the most heavily used times of day are different between weekdays and weekends, so 
+I decided to split the analysis in two to capture any additional differences based on the type of day.
+
+```sql
+--Identify most popular weekday time buckets and ride characteristics for each group
+SELECT
+  member_casual,
+  CASE
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 6 AND 8 THEN '1) Morning Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 9 AND 10 THEN '2) Mid-Morning'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 11 AND 12 THEN '3) Lunch Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 13 AND 15 THEN '4) Mid-Afternoon'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 16 AND 17 THEN '5) Evening Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 18 AND 21 THEN '6) Late Evening'
+    ELSE '7) Night'
+  END AS time_of_day,
+  COUNT(ride_id) AS ct,
+  ROUND(COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY member_casual) * 100, 2) AS pct_of_group_ct, --percent of casuals or members
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
+  ), 2) AS avg_duration,
+  ROUND(AVG(distance_meters), 2) AS avg_distance,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN avg_velocity_m_per_s END
+  ), 2) AS avg_velocity
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE day_of_week BETWEEN 2 AND 6 --Weekdays only
+GROUP BY member_casual, time_of_day
+ORDER BY member_casual, time_of_day;
+```
+
+```sql
+--Identify most popular weekend time buckets and ride characteristics for each group
+SELECT
+  member_casual,
+  CASE
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 6 AND 8 THEN '1) Morning Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 9 AND 10 THEN '2) Mid-Morning'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 11 AND 12 THEN '3) Lunch Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 13 AND 15 THEN '4) Mid-Afternoon'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 16 AND 17 THEN '5) Evening Rush'
+    WHEN EXTRACT(HOUR FROM started_at) BETWEEN 18 AND 21 THEN '6) Late Evening'
+    ELSE '7) Night'
+  END AS time_of_day,
+  COUNT(ride_id) AS ct,
+  ROUND(COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY member_casual) * 100, 2) AS pct_of_group_ct, --percent of casuals or members
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
+  ), 2) AS avg_duration,
+  ROUND(AVG(distance_meters), 2) AS avg_distance,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN avg_velocity_m_per_s END
+  ), 2) AS avg_velocity
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE day_of_week = 1 OR day_of_week = 7 --Weeknds only
+GROUP BY member_casual, time_of_day
+ORDER BY member_casual, time_of_day;
+```
+
+| Time Band Name | Time Range |
+|----------------|------------|
+| Morning Rush   | 6-9am      |
+| Mid-Morning    | 9-11am     |
+| Lunch Rush     | 11am-1pm   |
+| Afternoon      | 1-4pm      |
+| Evening Rush   | 4-6pm      |
+| Evening        | 6-10pm     |
+| Night          | 10pm-6am   |
+
+**Weekday Results**
+| member_casual | time_of_day      | ct     | pct_of_group_ct | avg_duration | avg_distance | avg_velocity  |
+|---------------|------------------|--------|-----------------|--------------|--------------|---------------|
+| casual        | 1) Morning Rush  | 118056 | 9.22            | 12           | 1916.93      | 3.45          |
+| casual        | 2) Mid-Morning   | 86224  | 6.73            | 19.98        | 2021.29      | 2.76          |
+| casual        | 3) Lunch Rush    | 125181 | 9.77            | 21.62        | 2149.37      | 2.53          |
+| casual        | 4) Mid-Afternoon | 237715 | 18.56           | 20.23        | 2169.59      | 2.6           |
+| casual        | 5) Evening Rush  | 257333 | 20.09           | 17.23        | 2273.36      | 2.85          |
+| casual        | 6) Late Evening  | 330726 | 25.82           | 16.52        | 2125.23      | 2.87          |
+| casual        | 7) Night         | 125791 | 9.82            | 15.33        | 2009.97      | 3.14          |
+| member        | 1) Morning Rush  | 526496 | 18.61           | 10.91        | 2311.59      | 3.75          |
+| member        | 2) Mid-Morning   | 220001 | 7.77            | 10.84        | 2051.3       | 3.47          |
+| member        | 3) Lunch Rush    | 236837 | 8.37            | 11.23        | 1925.65      | 3.29          |
+| member        | 4) Mid-Afternoon | 431216 | 15.24           | 11.84        | 2139.24      | 3.38          |
+| member        | 5) Evening Rush  | 618753 | 21.87           | 12.77        | 2408.86      | 3.42          |
+| member        | 6) Late Evening  | 628779 | 22.22           | 12.3         | 2233.91      | 3.4           |
+| member        | 7) Night         | 167780 | 5.93            | 11.59        | 2301.23      | 3.79          |
+
+Members show a much greater preference for the Morning Rush time band than casuals. Casuals show a slightly 
+greater preference for the Late Evening and Night time frames than members. For all other time bands, the 
+percentage of their total rides is approximately the same between members and casuals. The casual rides in 
+the Morning Rush band have an average duration and velocity significantly lower and higher, respectively, 
+than the rest of the casual rides. This makes the casual usage during the Morning Rush band much more similar 
+to the member usage than any other time band. This indicates that there is a moderately sized group of casual 
+rides that could be recruited into being members.
+
+**Weekend Results**
+| member_casual | time_of_day      | ct     | pct_of_group_ct | avg_duration | avg_distance | avg_velocity |
+|---------------|------------------|--------|-----------------|--------------|--------------|--------------|
+| casual        | 1) Morning Rush  | 32777  | 4.23            | 21.64        | 2250.66      | 2.95         |
+| casual        | 2) Mid-Morning   | 71975  | 9.28            | 23.72        | 2380.98      | 2.58         |
+| casual        | 3) Lunch Rush    | 115867 | 14.94           | 23.99        | 2481.55      | 2.42         |
+| casual        | 4) Mid-Afternoon | 198836 | 25.64           | 23.43        | 2413.94      | 2.36         |
+| casual        | 5) Evening Rush  | 121580 | 15.68           | 22.23        | 2318.41      | 2.41         |
+| casual        | 6) Late Evening  | 134602 | 17.36           | 19.98        | 2047.25      | 2.46         |
+| casual        | 7) Night         | 99787  | 12.87           | 16.93        | 1985.5       | 2.89         |
+| member        | 1) Morning Rush  | 56166  | 6.44            | 12.31        | 2353.33      | 3.74         |
+| member        | 2) Mid-Morning   | 99147  | 11.38           | 12.6         | 2274.84      | 3.44         |
+| member        | 3) Lunch Rush    | 131479 | 15.09           | 13.49        | 2344.5       | 3.28         |
+| member        | 4) Mid-Afternoon | 204491 | 23.46           | 14.03        | 2405.34      | 3.23         |
+| member        | 5) Evening Rush  | 132382 | 15.19           | 14.18        | 2349.7       | 3.22         |
+| member        | 6) Late Evening  | 160766 | 18.45           | 13.19        | 2226.65      | 3.29         |
+| member        | 7) Night         | 87155  | 10.0            | 12.16        | 2319.03      | 3.64         |
+
+On weekends, members and casuals take rides at similar rates throughout the day. Members show a slightly higher 
+preference for morning times and casuals show a higher preference for afternoon and night times. Interestingly, 
+the average member ride durations are only slightly higher than during the week and they maintained a similarly 
+high average velocity. This likely means that on weekends meany members are still taking rides for utilitarian 
+purposes rather than taking recreational rides.
+
+### 4.5 Bike Type Analysis
+
+```sql
+--Overall rideable type breakdown by user type
+SELECT
+  member_casual,
+  rideable_type,
+  ROUND(
+    COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY member_casual) * 100, 2
+  ) AS pct_of_group_ct, --percent of rideable type for each user type
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY member_casual, rideable_type
+ORDER BY member_casual, rideable_type;
+```
+**Annual Rideable Type Breakdown**
+| member_casual | rideable_type | pct_of_group_ct  |
+|---------------|---------------|------------------|
+| casual        | classic_bike  | 31.63            |
+| casual        | electric_bike | 68.37            |
+| member        | classic_bike  | 34.56            |
+| member        | electric_bike | 65.44            |
+
+Members and casuals appear to use bikes at roughly the same rates overall. The difference is too minor to make 
+any worthwhile conclusions. I suspect that changes during the Winter.
+
+```sql
+--Season-by-season rideable type breakdown by user type
+WITH season_data AS (
+  SELECT
+    CASE WHEN month BETWEEN 3 AND 5 THEN '1) Spring'
+      WHEN month BETWEEN 6 AND 8 THEN '2) Summer'
+      WHEN month BETWEEN 9 AND 10 THEN '3) Autumn'
+      ELSE '4) Winter'
+    END AS season,
+    member_casual,
+    rideable_type
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+) --Create the season column for display and partitioning
+
+SELECT
+  *,
+  ROUND(
+    COUNT(*) / SUM(COUNT(*)) OVER(PARTITION BY season, member_casual) * 100, 2
+  ) AS pct_of_group_ct, --percent of rideable type for each user type in the given season
+FROM season_data
+GROUP BY season, member_casual, rideable_type
+ORDER BY season, member_casual, rideable_type;
+```
+**Seasonal Rideable Type Breakdown**
+| season    | member_casual | rideable_type | pct_of_group_ct  |
+|-----------|---------------|---------------|------------------|
+| 1) Spring | casual        | classic_bike  | 26.81            |
+| 1) Spring | casual        | electric_bike | 73.19            |
+| 1) Spring | member        | classic_bike  | 31.89            |
+| 1) Spring | member        | electric_bike | 68.11            |
+| 2) Summer | casual        | classic_bike  | 35.6             |
+| 2) Summer | casual        | electric_bike | 64.4             |
+| 2) Summer | member        | classic_bike  | 36.43            |
+| 2) Summer | member        | electric_bike | 63.57            |
+| 3) Autumn | casual        | classic_bike  | 30.33            |
+| 3) Autumn | casual        | electric_bike | 69.67            |
+| 3) Autumn | member        | classic_bike  | 34.84            |
+| 3) Autumn | member        | electric_bike | 65.16            |
+| 4) Winter | casual        | classic_bike  | 26.86            |
+| 4) Winter | casual        | electric_bike | 73.14            |
+| 4) Winter | member        | classic_bike  | 34.4             |
+| 4) Winter | member        | electric_bike | 65.6             |
+
+Members consistently chose electric bikes about twice as often as classic bikes throughout the year. Casuals 
+had a similar ratio during the Summer and Autumn, but chose electric bikes a little less than 3 times more 
+often as classic bikes during the Winter and Spring.
+
+### 4.6 Station Analysis
+
+```sql
+--Determine the most used stations for each user type
+SELECT
+    member_casual,
+    station_id,
+    COUNT(*) AS num_rides,
+    DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+FROM (
+    SELECT member_casual, start_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE start_station_id IS NOT NULL
+    UNION ALL
+    SELECT member_casual, end_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE end_station_id IS NOT NULL
+) --Group start and end station data
+GROUP BY member_casual, station_id
+QUALIFY station_rk <= 10 --Keep only top 10 from the window function;
+```
+
+| member_casual | station_id | num_rides | station_rk |
+|---------------|------------|-----------|------------|
+| casual        | CHI01747   | 106625    | 1          |
+| casual        | CHI00374   | 61199     | 2          |
+| casual        | CHI00252   | 45606     | 3          |
+| casual        | CHI00525   | 41870     | 4          |
+| casual        | CHI01742   | 37873     | 5          |
+| casual        | CHI00420   | 33712     | 6          |
+| casual        | CHI00533   | 31237     | 7          |
+| casual        | CHI00531   | 28182     | 8          |
+| casual        | CHI00427   | 21346     | 9          |
+| casual        | CHI01163   | 20322     | 10         |
+| member        | CHI00299   | 52598     | 1          |
+| member        | CHI00498   | 44024     | 2          |
+| member        | CHI01772   | 41180     | 3          |
+| member        | CHI00233   | 40778     | 4          |
+| member        | CHI00509   | 40616     | 5          |
+| member        | CHI00281   | 38133     | 6          |
+| member        | CHI00540   | 38054     | 7          |
+| member        | CHI00396   | 37956     | 8          |
+| member        | CHI01091   | 36795     | 9          |
+| member        | CHI00294   | 35515     | 10         |
+
+There is no overlap between the the top 10 most used stations for members and casuals. This suggests that 
+members and casuals are at least somewhat geographically separated. Also, casuals have a much more noticable 
+drop in number of rides as rank decreases suggesting that casuals are more concentrated in certain stations.
+
+```sql
+--Display top 10 for casuals and members along with their corresponding rank for the other group
+WITH all_rk AS (
+  SELECT
+    member_casual,
+    station_id,
+    COUNT(*) AS num_rides,
+    DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+  FROM (
+    SELECT member_casual, start_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE start_station_id IS NOT NULL
+    UNION ALL
+    SELECT member_casual, end_station_id AS station_id
+    FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+    WHERE end_station_id IS NOT NULL
+  ) --Group start and end station data
+  GROUP BY member_casual, station_id
+), --Build the full list of casual and member ranks
+
+split_rk AS (
+  SELECT
+    station_id,
+    MAX(CASE WHEN member_casual = 'casual' THEN station_rk END) AS casual_rk,
+    MAX(CASE WHEN member_casual = 'casual' THEN num_rides END) AS casual_rides,
+    MAX(CASE WHEN member_casual = 'member' THEN station_rk END) AS member_rk,
+    MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
+  FROM all_rk
+  GROUP BY station_id
+) --Split the member and casual station ranks so both can be displayed
+
+SELECT --Build Casual Top 10 List
+  'Casual Top 10' as list,
+  station_id,
+  casual_rk,
+  casual_rides,
+  member_rk,
+  member_rides
+FROM split_rk
+WHERE casual_rk <= 10
+UNION ALL
+SELECT --Build Member Top 10 List
+  'Member Top 10' as list,
+  station_id,
+  casual_rk,
+  casual_rides,
+  member_rk,
+  member_rides
+FROM split_rk
+WHERE member_rk <= 10
+ORDER BY
+  CASE WHEN list = 'Casual Top 10' THEN 1 ELSE 2 END, --Put casual list first
+  CASE WHEN list = 'Casual Top 10' THEN casual_rk ELSE member_rk END --Order by rank;
+```
+
+| list          | station_id | casual_rk | casual_rides | member_rk | member_rides |
+|---------------|------------|-----------|--------------|-----------|--------------|
+| Casual Top 10 | CHI01747   | 1         | 106625       | 24        | 28160        |
+| Casual Top 10 | CHI00374   | 2         | 61199        | 94        | 17726        |
+| Casual Top 10 | CHI00252   | 3         | 45606        | 32        | 25868        |
+| Casual Top 10 | CHI00525   | 4         | 41870        | 21        | 28479        |
+| Casual Top 10 | CHI01742   | 5         | 37873        | 112       | 16196        |
+| Casual Top 10 | CHI00420   | 6         | 33712        | 47        | 23254        |
+| Casual Top 10 | CHI00533   | 7         | 31237        | 259       | 8258         |
+| Casual Top 10 | CHI00531   | 8         | 28182        | 167       | 12555        |
+| Casual Top 10 | CHI00427   | 9         | 21346        | 123       | 15509        |
+| Casual Top 10 | CHI01163   | 10        | 20322        | 173       | 12272        |
+| Member Top 10 | CHI00299   | 23        | 16082        | 1         | 52598        |
+| Member Top 10 | CHI00498   | 32        | 13798        | 2         | 44024        |
+| Member Top 10 | CHI01772   | 28        | 14173        | 3         | 41180        |
+| Member Top 10 | CHI00233   | 38        | 12643        | 4         | 40778        |
+| Member Top 10 | CHI00509   | 85        | 8957         | 5         | 40616        |
+| Member Top 10 | CHI00281   | 21        | 16387        | 6         | 38133        |
+| Member Top 10 | CHI00540   | 25        | 15786        | 7         | 38054        |
+| Member Top 10 | CHI00396   | 16        | 18205        | 8         | 37956        |
+| Member Top 10 | CHI01091   | 55        | 10569        | 9         | 36795        |
+| Member Top 10 | CHI00294   | 29        | 14094        | 10        | 35515        |
+
+After further investigation, members and casuals are definitely fairly segregated since only station id 
+CHI00396 makes it into both group's top 20 and many are significantly further down the rankings. Additionally, 
+the member rides are definitely more spread out across different stations making more extensive use of the 
+entire station network than casuals.
+
+```sql
+--Identify any stations that fall into both group's top 50 and are member dominated
+--This table will be saved and used to generate a map of these stations' locations 
+WITH src AS (
+  SELECT member_casual, start_station_id AS station_id, start_lat AS lat, start_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE start_station_id IS NOT NULL
+  UNION ALL
+  SELECT member_casual, end_station_id AS station_id, end_lat AS lat, end_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE end_station_id IS NOT NULL
+), --Combine start and end station data together
+
+all_rk AS (
+  SELECT
+    member_casual,
+    station_id,
+    COUNT(*) AS num_rides,
+    DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) AS station_rk
+  FROM src
+  GROUP BY member_casual, station_id
+), --Build the full list of casual and member ranks
+
+split_rk AS (
+  SELECT
+    station_id,
+    MAX(CASE WHEN member_casual = 'casual' THEN station_rk END) AS casual_rk,
+    MAX(CASE WHEN member_casual = 'casual' THEN num_rides END) AS casual_rides,
+    MAX(CASE WHEN member_casual = 'member' THEN station_rk END) AS member_rk,
+    MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
+  FROM all_rk
+  GROUP BY station_id
+), --Split the member and casual station ranks so both can be displayed
+
+geo AS (
+  SELECT
+    station_id,
+    ROUND(AVG(lat), 4) AS lat,
+    ROUND(AVG(lng), 4) AS lng
+  FROM src
+  GROUP BY station_id
+) --Find the average coordinate for each station
+
+SELECT --Build list of high ROI stations
+  s.station_id,
+  g.lat,
+  g.lng,
+  s.casual_rk,
+  s.casual_rides,
+  s.member_rk,
+  s.member_rides,
+  ROUND(s.member_rides/s.casual_rides, 2) AS mem_cas_ratio
+FROM split_rk s
+LEFT JOIN geo g
+  ON s.station_id = g.station_id
+WHERE s.casual_rk <= 50
+  AND s.member_rk <= 50
+  AND s.member_rides > s.casual_rides --Member dominated
+ORDER BY mem_cas_ratio DESC --Highest difference first;
+```
+
+| station_id | lat     | lng      | casual_rk | casual_rides | member_rk | member_rides | mem_cas_ratio  |
+|------------|---------|----------|-----------|--------------|-----------|--------------|----------------|
+| CHI00299   | 41.8891 | -87.6385 | 23        | 16082        | 1         | 52598        | 3.27           |
+| CHI00233   | 41.8824 | -87.6412 | 38        | 12643        | 4         | 40778        | 3.23           |
+| CHI00498   | 41.8824 | -87.6398 | 32        | 13798        | 2         | 44024        | 3.19           |
+| CHI01772   | 41.8966 | -87.6286 | 28        | 14173        | 3         | 41180        | 2.91           |
+| CHI00517   | 41.8887 | -87.6444 | 46        | 11431        | 16        | 30549        | 2.67           |
+| CHI00294   | 41.8948 | -87.6344 | 29        | 14094        | 10        | 35515        | 2.52           |
+| CHI00540   | 41.9032 | -87.6343 | 25        | 15786        | 7         | 38054        | 2.41           |
+| CHI00281   | 41.903  | -87.6313 | 21        | 16387        | 6         | 38133        | 2.33           |
+| CHI00332   | 41.8899 | -87.6343 | 34        | 13554        | 11        | 31332        | 2.31           |
+| CHI00430   | 41.9455 | -87.6464 | 44        | 11627        | 30        | 26881        | 2.31           |
+| CHI00306   | 41.899  | -87.6299 | 33        | 13616        | 19        | 28881        | 2.12           |
+| CHI00524   | 41.8672 | -87.626  | 43        | 11646        | 39        | 24469        | 2.1            |
+| CHI00396   | 41.9121 | -87.6347 | 16        | 18205        | 8         | 37956        | 2.08           |
+| CHI00390   | 41.9376 | -87.6441 | 45        | 11525        | 42        | 23903        | 2.07           |
+| CHI00353   | 41.9402 | -87.6529 | 35        | 13539        | 25        | 27694        | 2.05           |
+| CHI00345   | 41.8847 | -87.6195 | 31        | 13969        | 29        | 26973        | 1.93           |
+| CHI00330   | 41.8926 | -87.6173 | 24        | 15825        | 22        | 28450        | 1.8            |
+| CHI00295   | 41.8939 | -87.6299 | 36        | 13498        | 41        | 23917        | 1.77           |
+| CHI00474   | 41.9183 | -87.6363 | 13        | 18799        | 17        | 30409        | 1.62           |
+| CHI00358   | 41.8908 | -87.6317 | 26        | 15559        | 38        | 24542        | 1.58           |
+| CHI00279   | 41.8908 | -87.6186 | 20        | 16791        | 35        | 25296        | 1.51           |
+| CHI00413   | 41.9157 | -87.6346 | 11        | 19405        | 20        | 28821        | 1.49           |
+| CHI00313   | 41.8915 | -87.6268 | 15        | 18575        | 34        | 25669        | 1.38           |
+| CHI01677   | 41.884  | -87.6247 | 14        | 18674        | 44        | 23435        | 1.25           |
+
+These 24 stations have highest potential for out-of-home (OOH) marketing ROI. They are high volume for both members and casuals but are still member dominated. Many of the casuals passing through these station are using the bikes similarly to members. Only two stations from the member top 10 list are not indluded, 5th place CHI00509 and 9th place CHI01091. In both cases, these stations were not popular enough with casuals to satisfy the criteria for high ROI. This table was downloaded as a csv with the intention of using it to create a map of high ROI stations.
+
+In order to group the locations of abandoned bikes (those not left at a station) and identify strong areas for expansion, I used BigQuery's ST_CLUSTERDBSCAN function but the millions of points overwhelmed the memory allotment for the task. In response, I used geohashing to pre-aggregate the points and previewed the grids to make sure I would not repeat my previous mistake.
+
+```sql
+--Cluster points into geohash grids to aggregate data before using ST_CLUSTERDBSCAN
+SELECT
+  ST_GEOHASH(ST_GEOGPOINT(lng, lat), 8) as geohash, --Size 8 is about 38m by 19m
+  AVG(lat) as avg_lat,
+  AVG(lng) as avg_lng,
+  COUNT(*) as total_rides,
+  COUNT(CASE WHEN member_casual = 'casual' THEN 1 END) as casual_rides,
+  COUNT(CASE WHEN member_casual = 'member' THEN 1 END) as member_rides
+FROM (
+  SELECT member_casual, start_lat AS lat, start_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE start_station_id IS NULL
+  UNION ALL
+  SELECT member_casual, end_lat AS lat, end_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE end_station_id IS NULL
+) --Group start and end station nulls together
+GROUP BY geohash
+HAVING total_rides > 10
+ORDER BY total_rides DESC;
+```
+
+This revealed 651 grids with 10+ abandoned bikes, nearly 70 grids with 10,000+ abandoned bikes, and 10 with over 50,000 abandoned bikes. Considering these grids are only 38 meters by 19 meters, these volumes seem incredibly unlikely. After reviewing the latitude and longitude, it appears that most of the coordinates were truncated to the hundreths place. This may be common practice for rides ending outside of a station or perhaps a storage/repair warehouse location.
+
+```sql
+--Cluster points into geohash grids to aggregate data before using ST_CLUSTERDBSCAN
+SELECT
+  ST_GEOHASH(ST_GEOGPOINT(lng, lat), 8) as geohash,
+  AVG(lat) as avg_lat,
+  AVG(lng) as avg_lng,
+  COUNT(*) as total_rides,
+  COUNT(DISTINCT CONCAT(CAST(lat AS STRING), ',', CAST(lng AS STRING))) as unique_gps_points
+FROM (
+  SELECT member_casual, start_lat AS lat, start_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE start_station_id IS NULL
+  UNION ALL
+  SELECT member_casual, end_lat AS lat, end_lng AS lng
+  FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+  WHERE end_station_id IS NULL
+) --Group start and end station nulls together
+GROUP BY geohash
+HAVING unique_gps_points > 3 --Need the geohash grid to contain different coordinates
+ORDER BY total_rides DESC;
+```
+
+Filtering for any grids that have at least 3 unique coordinates gave no results, so the data is not detailed enough to identify new station location possibilities.
