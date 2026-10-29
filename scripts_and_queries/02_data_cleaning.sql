@@ -336,7 +336,7 @@ CREATE OR REPLACE TABLE `ride-share-500415.Ride_Share_Marketing_Analysis.raw_com
 
 
 
---Step 6: Identify any problems in ride duration
+--Step 6: Sanity check on ride duration
 --Checking duration buckets to understand the breakdown
 WITH time_data AS (
     SELECT ROUND(TIMESTAMP_DIFF(ended_at, started_at, minute),0) AS ride_duration
@@ -438,7 +438,7 @@ GROUP BY member_casual;
 
 
 
---Step 7: Identify any issues related to how quickly bikes traveled during the ride
+--Step 7: Sanity check on ride velocity
 WITH time_data AS (
     SELECT
         rideable_type,
@@ -470,7 +470,7 @@ CREATE OR REPLACE TABLE `ride-share-500415.Ride_Share_Marketing_Analysis.raw_com
 );
 
 
-
+--Add the new columns and filter out unwanted rows
 CREATE OR REPLACE TABLE `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share` AS (
     WITH trips AS (
         SELECT
@@ -504,7 +504,7 @@ CREATE OR REPLACE TABLE `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned
         
     SELECT *
     FROM trips
-    WHERE ride_duration_minutes > 0 --No negative durations
+    WHERE ride_duration_minutes > 0 --No zero or negative durations
       AND CASE
           WHEN ride_duration_minutes <= 2
             AND distance_meters > 50 THEN 1
