@@ -744,3 +744,286 @@ CREATE OR REPLACE TABLE `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned
 
 ### 4.1 Overall Statistics
 
+```sql
+--Summary statistics for ride distance by user type
+SELECT
+  member_casual,
+  ROUND(AVG(distance_meters), 2) AS avg_dist,
+  ROUND(STDDEV(distance_meters), 2) AS std_dev_dist,
+  ROUND(APPROX_QUANTILES(distance_meters, 4)[OFFSET(0)], 2) AS min_dist,
+  ROUND(APPROX_QUANTILES(distance_meters, 4)[OFFSET(1)], 2) AS q1_dist,
+  ROUND(APPROX_QUANTILES(distance_meters, 4)[OFFSET(2)], 2) AS q2_dist,
+  ROUND(APPROX_QUANTILES(distance_meters, 4)[OFFSET(3)], 2) AS q3_dist,
+  ROUND(APPROX_QUANTILES(distance_meters, 4)[OFFSET(4)], 2) AS max_dist
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY member_casual;
+```
+
+| type  | avg_dist| std_dev_dist |
+|-------|---------|--------------|
+|casual | 2185.47 | 2019.73      |
+|member | 2257.79 | 1986.41      |
+
+| type | min_dist | q1_dist | q2_dist | q3_dist | max_dist |
+|----- |----------|---------|---------|---------|----------|
+|casual| 0.0      | 932.55  | 1650.06 | 2855.99 | 48370.88 |
+|member| 0.0      | 954.65  | 1636.13 | 2949.42 | 48370.88 |
+
+There appears to be minimal difference between the straight line distance that members and casuals travel.
+
+```sql
+--Summary statistics for ride duration by user type
+SELECT
+  member_casual,
+  ROUND(AVG(ride_duration_minutes), 2) AS avg_time,
+  ROUND(STDDEV(ride_duration_minutes), 2) AS std_dev_time,
+  ROUND(APPROX_QUANTILES(ride_duration_minutes, 4)[OFFSET(0)], 2) AS min_time,
+  ROUND(APPROX_QUANTILES(ride_duration_minutes, 4)[OFFSET(1)], 2) AS q1_time,
+  ROUND(APPROX_QUANTILES(ride_duration_minutes, 4)[OFFSET(2)], 2) AS q2_time,
+  ROUND(APPROX_QUANTILES(ride_duration_minutes, 4)[OFFSET(3)], 2) AS q3_time,
+  ROUND(APPROX_QUANTILES(ride_duration_minutes, 4)[OFFSET(4)], 2) AS max_time
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE ride_duration_minutes <= 1440 --Excluded since bikes cannot be rented > 24 hours
+GROUP BY member_casual;
+```
+
+| type | avg_time | std_dev_time |
+|------|----------|--------------|
+|casual| 19.17    | 38.01        |
+|member| 12.19    | 21.6         |
+
+| type | min_time | q1_time | q2_time | q3_time | max_time |
+|------|----------|---------|---------|---------|----------|
+|casual| 0.02     | 6.47    | 11.47   | 21.03   | 1439.97  |
+|member| 0.02     | 5.12    | 8.68    | 14.7    | 1439.82  |
+
+Member ride durations tend to be shorter and have much less variation than casual ride durations. Noteably, 
+more than half of all member rides end before 10 minutes and more than 75% end before 15 minutes.
+
+```sql
+--Summary statistics for ride velocity by user type
+SELECT
+  member_casual,
+  ROUND(AVG(avg_velocity_m_per_s), 2) AS avg_velocity,
+  ROUND(STDDEV(avg_velocity_m_per_s), 2) AS std_dev_velocity,
+  ROUND(APPROX_QUANTILES(avg_velocity_m_per_s, 4)[OFFSET(0)], 2) AS min_velocity,
+  ROUND(APPROX_QUANTILES(avg_velocity_m_per_s, 4)[OFFSET(1)], 2) AS q1_velocity,
+  ROUND(APPROX_QUANTILES(avg_velocity_m_per_s, 4)[OFFSET(2)], 2) AS q2_velocity,
+  ROUND(APPROX_QUANTILES(avg_velocity_m_per_s, 4)[OFFSET(3)], 2) AS q3_velocity,
+  ROUND(APPROX_QUANTILES(avg_velocity_m_per_s, 4)[OFFSET(4)], 2) AS max_velocity
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE ride_duration_minutes <= 1440 --Excluded since bikes cannot be rented > 24 hours
+GROUP BY member_casual;
+```
+
+Velocity Results:
+| Type | avg_velocity | std_dev_velocity |
+|------|--------------|------------------|
+|casual| 2.72         | 1.66             |
+|member| 3.45         | 1.46             |
+
+| Type | min_velocity | q1_velocity | q2_velocity | q3_velocity | max_velocity |
+|------|--------------|-------------|-------------|-------------|--------------|
+|casual| 0.0          | 1.59        | 2.78        | 3.85        | 11.0         |
+|member| 0.0          | 2.61        | 3.45        | 4.38        | 11.0         |
+
+Member ride velocities are also higher as a result of relatively similar distances and much shorter durations. 
+This information would be much more interesting and useful if the bikes had an odometer that tracked the 
+total distance covered.
+
+```sql
+--Examine duration buckets for classic bikes based on how rides are priced
+SELECT 
+  CASE WHEN ride_duration_minutes >= 0 AND ride_duration_minutes <= 45 THEN '1) 0-45 min'
+    WHEN ride_duration_minutes > 45 AND ride_duration_minutes <= 180 THEN '2) 45 min - 3 hrs'
+    WHEN ride_duration_minutes >180 THEN '3) 3+ hrs'
+    END AS duration_category, 
+  ROUND(100 * COUNT(CASE WHEN member_casual = 'member' THEN member_casual END)
+    / SUM(COUNT(CASE WHEN member_casual = 'member' THEN member_casual END)) OVER(), 2) AS pct_member, 
+  ROUND(100 * COUNT(CASE WHEN member_casual = 'casual' THEN member_casual END)
+    / SUM(COUNT(CASE WHEN member_casual = 'casual' THEN member_casual END)) OVER(), 2) AS pct_casual
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE rideable_type = 'classic_bike'
+GROUP BY 1
+ORDER BY 1;
+```
+
+```sql
+--Examine duration buckets for electric bikes based on how rides are priced
+SELECT 
+  CASE WHEN ride_duration_minutes >= 0 AND ride_duration_minutes <= 45 THEN '1) 0-45 min'
+    WHEN ride_duration_minutes > 45 AND ride_duration_minutes <= 180 THEN '2) 45 min - 3 hrs'
+    WHEN ride_duration_minutes >180 THEN '3) 3+ hrs'
+    END AS duration_category, 
+  ROUND(100 * COUNT(CASE WHEN member_casual = 'member' THEN member_casual END)
+    / SUM(COUNT(CASE WHEN member_casual = 'member' THEN member_casual END)) OVER(), 2) AS pct_member, 
+  ROUND(100 * COUNT(CASE WHEN member_casual = 'casual' THEN member_casual END)
+    / SUM(COUNT(CASE WHEN member_casual = 'casual' THEN member_casual END)) OVER(), 2) AS pct_casual
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE rideable_type = 'electric_bike'
+GROUP BY 1
+ORDER BY 1;
+```
+
+Classic Bike Results:
+| duration_category | pct_member | pct_casual |
+|-------------------|------------|------------|
+| 1) 0-45 min       | 98.0       | 84.86      |
+| 2) 45 min - 3 hrs | 1.8        | 14.17      |
+| 3) 3+ hrs         | 0.2        | 0.97       |
+
+Electric Bike Results:
+| duration_category | pct_member | pct_casual |
+|-------------------|------------|------------|
+| 1) 0-45 min       | 98.7       | 95.74      |
+| 2) 45 min - 3 hrs | 1.22       | 4.22       |
+| 3) 3+ hrs         | 0.08       | 0.04       |
+
+Classic bikes have a free 45 minute grace period for members before they incur additional charges so it makes sense that members overwhelmingly end their rides before then. Similarly, casuals includes the day pass category which includes 3 hours before incurring additional charges so it makes sense for their rides to have a much larger percentage in that group. There is no similar free member period for electric bikes and the rates are similar between members and casuals, though casuals are more likely to have longer duration rides.
+
+### 4.2 Seasonality Analysis
+
+```sql
+--Identify when peak casual usage periods are in the year and when casual usage changes rapidly
+WITH avgs AS (
+SELECT
+  month,
+  COUNT(ride_id) AS ct,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
+    ), 2) AS avg_duration,
+  ROUND(AVG(distance_meters), 2) AS avg_distance
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE member_casual = 'casual'
+GROUP BY month
+) --Calculate average duration and distance per month
+
+SELECT 
+  month,
+  ct,
+  ROUND(
+    (ct - LAG(ct) OVER(ORDER BY month)) / LAG(ct) OVER(ORDER BY month) * 100, 2
+  ) AS pct_change_ct, --percent change in number of rides from previous month
+  avg_duration,
+  ROUND(
+    (avg_duration - LAG(avg_duration) OVER(ORDER BY month)) / LAG(avg_duration) OVER(ORDER BY month) * 100, 2
+  ) AS pct_change_dur, --percent change in ride duration from previous month
+  avg_distance,
+  ROUND(
+    (avg_distance - LAG(avg_distance) OVER(ORDER BY month)) / LAG(avg_distance) OVER(ORDER BY month) * 100, 2
+  ) AS pct_change_dist --percent change in ride distance from previous month
+FROM avgs
+ORDER BY month;
+```
+
+```sql
+--Identify when peak member usage periods are in the year and when member usage changes rapidly
+WITH avgs AS (
+SELECT
+  month,
+  COUNT(ride_id) AS ct,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
+    ), 2) AS avg_duration,
+  ROUND(AVG(distance_meters), 2) AS avg_distance
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+WHERE member_casual = 'member'
+GROUP BY month
+) --Calculate average duration and distance per month
+
+SELECT 
+  month,
+  ct,
+  ROUND(
+    (ct - LAG(ct) OVER(ORDER BY month)) / LAG(ct) OVER(ORDER BY month) * 100, 2
+  ) AS pct_change_ct, --percent change in number of rides from previous month
+  avg_duration,
+  ROUND(
+    (avg_duration - LAG(avg_duration) OVER(ORDER BY month)) / LAG(avg_duration) OVER(ORDER BY month) * 100, 2
+  ) AS pct_change_dur, --percent change in ride duration from previous month
+  avg_distance,
+  ROUND(
+    (avg_distance - LAG(avg_distance) OVER(ORDER BY month)) / LAG(avg_distance) OVER(ORDER BY month) * 100, 2
+  ) AS pct_change_dist --percent change in ride distance from previous month
+FROM avgs
+ORDER BY month;
+```
+
+Results Casuals:
+| month | ct     | pct_change_ct | avg_duration | pct_change_dur | avg_distance | pct_change_dist  |
+|-------|--------|---------------|--------------|----------------|--------------|------------------|
+| 1     | 24245  |               | 12.81        |                | 1615.75      |                  |
+| 2     | 40448  | 66.83         | 13.95        | 8.9            | 1819.51      | 12.61            |
+| 3     | 86024  | 112.68        | 16.63        | 19.21          | 1970.04      | 8.27             |
+| 4     | 129026 | 49.99         | 16.4         | -1.38          | 2064.06      | 4.77             |
+| 5     | 239914 | 85.94         | 19.39        | 18.23          | 2225.24      | 7.81             |
+| 6     | 285582 | 19.04         | 21.33        | 10.01          | 2277.47      | 2.35             |
+| 7     | 316138 | 10.7          | 20.9         | -2.02          | 2240.93      | -1.6             |
+| 8     | 330755 | 4.62          | 21.22        | 1.53           | 2308.71      | 3.02             |
+| 9     | 260061 | -21.37        | 19.14        | -9.8           | 2277.62      | -1.35            |
+| 10    | 219670 | -15.53        | 17.64        | -7.84          | 2125.68      | -6.67            |
+| 11    | 97106  | -55.79        | 14.7         | -16.67         | 1903.48      | -10.45           |
+| 12    | 27481  | -71.7         | 12.68        | -13.74         | 1649.16      | -13.36           |
+
+Results Members:
+| month | ct     | pct_change_ct | avg_duration | pct_change_dur | avg_distance | pct_change_dist  |
+|-------|--------|---------------|--------------|----------------|--------------|------------------|
+| 1     | 111342 |               | 11.42        |                | 1838.72      |                  |
+| 2     | 158345 | 42.21         | 10.67        | -6.57          | 1980.49      | 7.71             |
+| 3     | 225628 | 42.49         | 11.22        | 5.15           | 2088.18      | 5.44             |
+| 4     | 312164 | 38.35         | 11.39        | 1.52           | 2173.8       | 4.1              |
+| 5     | 402640 | 28.98         | 12.32        | 8.17           | 2299.07      | 5.76             |
+| 6     | 382627 | -4.97         | 12.73        | 3.33           | 2405.1       | 4.61             |
+| 7     | 434775 | 13.63         | 13.02        | 2.28           | 2384.64      | -0.85            |
+| 8     | 446895 | 2.79          | 12.96        | -0.46          | 2419.09      | 1.44             |
+| 9     | 444273 | -0.59         | 12.51        | -3.47          | 2386.65      | -1.34            |
+| 10    | 417535 | -6.02         | 12.01        | -4             | 2235.02      | -6.35            |
+| 11    | 254555 | -39.03        | 11.53        | -4             | 2071.07      | -7.34            |
+| 12    | 110669 | -56.52        | 11.55        | 0.17           | 1847.69      | -10.79           |
+
+Both the number of member and casual rides show a distinct preference for summer months. However, the trend is much stronger for casual users with the winter averages dropping to less than 1/10 of their peak summer activity. Member activity during the winter only dropped to 1/4 of their peak summer activity.
+
+The number of member rides also remains roughly consistent from May through October though there is a notable jump in activity during July. The number of casual rides stablizes between June and August. As compared to the members, casuals also show more rapid growth and drop off on either end of their stable usage period. 
+
+Member ride duration maintained averages between 10.5 and 13.5 minutes. Casuals instead showed a very large variation in averages ranging from 12.7 to 21.3 minutes. This shows that casual rides are not only more common in the summer months but are also significantly longer while the member ride durations only slightly change.
+
+Both members and casuals show similar distance trends as well with greater distance associated with warmer months. Generally, members averaged a slightly greater distance on their trips. During the winter months the difference was higher at around 200 meters and the gap shrank to less than 100 meters during the summer indicating that members show less variation as temperature changes.
+
+### 4.3 Day of Week Analysis
+
+```sql
+--Determine the most popular days for members and casuals
+--Identify any duration, distance, or velocity trends
+SELECT
+  member_casual,
+  day_of_week,
+  COUNT(ride_id) AS ct,
+  ROUND(AVG(
+    CASE WHEN ride_duration_minutes <= 1440 THEN ride_duration_minutes END
+  ), 2) AS avg_duration, --Exclude durations > 24 hours
+  ROUND(AVG(distance_meters), 2) AS avg_distance
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY day_of_week, member_casual
+ORDER BY day_of_week, member_casual;
+```
+
+| member_casual | day_of_week | ct     | avg_duration | avg_distance | avg_velocity  |
+|---------------|-------------|--------|--------------|--------------|---------------|
+| casual        | 1           | 352270 | 22.24        | 2260.24      | 2.49          |
+| casual        | 2           | 240190 | 19.33        | 2123.66      | 2.71          |
+| casual        | 3           | 230287 | 16.72        | 2107.1       | 2.93          |
+| casual        | 4           | 232008 | 15.89        | 2096.73      | 2.98          |
+| casual        | 5           | 261943 | 16.72        | 2131.32      | 2.94          |
+| casual        | 6           | 316598 | 18.7         | 2166.93      | 2.75          |
+| casual        | 7           | 423154 | 21.52        | 2297.03      | 2.52          |
+| member        | 1           | 408689 | 13.39        | 2308.89      | 3.35          |
+| member        | 2           | 520753 | 11.93        | 2211.68      | 3.47          |
+| member        | 3           | 585663 | 11.75        | 2245.73      | 3.5           |
+| member        | 4           | 587521 | 11.67        | 2247.31      | 3.51          |
+| member        | 5           | 594163 | 11.73        | 2259.37      | 3.51          |
+| member        | 6           | 541762 | 12.1         | 2211.93      | 3.45          |
+| member        | 7           | 462897 | 13.33        | 2344.73      | 3.35          |
+
+With Sunday-Saturday as 1-7, we can see that members and casuals follow opposite patterns. Casuals favor rides on the weekend with a particular focus on Saturdays. Member take more rides on weekdays with Wednesdays being the peak day. In both members and casuals, the average duration and distance peak on the weekend and show a mild elevation on Mondays and Fridays as compared to other weekdays. The member rides show a very slight decrease in the average velocity on the weekend whereas the weekend decrease is more pronounced in casual rides.
+
+### 4.4 Time of Day Analysis
