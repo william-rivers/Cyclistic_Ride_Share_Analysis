@@ -424,3 +424,45 @@ WHERE s.casual_rk <= 50
   AND s.member_rk <= 50
   AND s.member_rides > s.casual_rides --Member dominated
 ORDER BY mem_cas_ratio DESC --Highest difference first;
+
+
+
+--STEP 7: Aggregate points for creating heatmaps of activity
+--Initially attempted without aggregation and heatmap required > 1 min load time
+SELECT --Build list of start points
+  'start' AS pt_type,
+  ROUND(start_lat, 4) AS lat, --rounded to group points together
+  ROUND(start_lng , 4) AS lng, --rounded to group points together
+  member_casual,
+  CASE WHEN month BETWEEN 3 AND 5 THEN 'Spring'
+    WHEN month BETWEEN 6 AND 8 THEN 'Summer'
+    WHEN month BETWEEN 9 AND 11 THEN 'Winter'
+    ELSE 'Fall'
+  END AS geo_season, --Reduced number of aggregated points from 12x to 4x
+  CASE WHEN day_of_week BETWEEN 2 AND 6 THEN 'Weekday'
+    ELSE 'Weekend'
+  END AS day_type, --Reduced number of aggregated points from 7x to 2x
+  rideable_type,
+  COUNT(*) AS num_rides --Keeps the intensity in the heatmap
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY 1,2,3,4,5,6,7
+HAVING COUNT(*) > 5
+UNION ALL
+SELECT --Build list of end points
+  'end' AS pt_type,
+  ROUND(end_lat, 4) AS lat, --rounded to group points together
+  ROUND(end_lng , 4) AS lng, --rounded to group points together
+  member_casual,
+  CASE WHEN month BETWEEN 3 AND 5 THEN 'Spring'
+    WHEN month BETWEEN 6 AND 8 THEN 'Summer'
+    WHEN month BETWEEN 9 AND 11 THEN 'Winter'
+    ELSE 'Fall'
+  END AS geo_season, --Reduced number of aggregated points from 12x to 4x
+  CASE WHEN day_of_week BETWEEN 2 AND 6 THEN 'Weekday'
+    ELSE 'Weekend'
+  END AS day_type, --Reduced number of aggregated points from 7x to 2x
+  rideable_type,
+  COUNT(*) AS num_rides --Keeps the intensity in the heatmap
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY 1,2,3,4,5,6,7
+HAVING COUNT(*) > 5 --Drops some of the background noise;
