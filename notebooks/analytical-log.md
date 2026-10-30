@@ -223,6 +223,9 @@ SELECT COUNTIF(ride_id IS NULL OR ride_id = '') AS null_ride_id,
 FROM `ride-share-500415.Ride_Share_Marketing_Analysis.raw_combined_ride_share`;
 ```
 
+NOTE: COUNTIF() is specific to GoogleSQL and probably a few other dialects but is not standard SQL. Would need 
+to use SUM(CASE WHEN) in standard sql
+
 | column                  | null_count|
 |-------------------------|-----------|
 | null_ride_id            | 0         |
@@ -285,6 +288,9 @@ CREATE OR REPLACE TABLE `ride-share-500415.Ride_Share_Marketing_Analysis.raw_com
   FROM `ride-share-500415.Ride_Share_Marketing_Analysis.raw_combined_ride_share`
 );
 ```
+
+NOTE: CREATE OR REPLACE TABLE is more common in Big Data architecture. In other environments, I would need to 
+use a different name.
 
 ```sql
 --Remove duplicate rides
@@ -410,7 +416,12 @@ GROUP BY 1
 ORDER BY 1;
 ```
 
-Start Station Results:
+NOTE: Had difficulty with isolating the nearest station. After researching online, I discovered two methods. 
+The QUALIFY statement included here and using CTEs with a WHERE rank condition in the main query. I chose to use 
+QUALIFY here because I thought it would be more efficient since it is a function specific to GoogleSQL. After 
+further research, it appears to use nearly identical methods. 
+
+**Start Station Results**
 | distance_category | total_trips  |
 |-------------------|--------------|
 | 30m to 40m away   | 6007         |
@@ -423,7 +434,7 @@ Start Station Results:
 | Over 100m away    | 980419       |
 | Within 30m        | 13478        |
 
-End Station Results:
+**End Station Results**
 | distance_category | total_trips  |
 |-------------------|--------------|
 | 30m to 40m away   | 6174         |
@@ -900,6 +911,10 @@ GROUP BY 1
 ORDER BY 1;
 ```
 
+I had moderate trouble with the percent calculation because of the SUM window function. I forgot 
+that I can do aggregate functions using window functions and almost used a CTE to calculate the sum 
+for member and casual before realizing that I could just use OVER().
+
 **Pricing Structure**
 | Bike Type | Single Ride (Casual)  | Day Pass (Casual)      | Annual Membership                           |
 |-----------|-----------------------|------------------------|-------------------------------------------- |
@@ -1014,6 +1029,8 @@ FROM avgs
 ORDER BY month;
 ```
 
+NOTE: In retrospect, I should have used COALESCE(lag expression, "N/A") to fill the blank spot in January.
+
 **Casual Results**
 | month | ct     | pct_change_ct | avg_duration | pct_change_dur | avg_distance | pct_change_dist  |
 |-------|--------|---------------|--------------|----------------|--------------|------------------|
@@ -1085,9 +1102,14 @@ SELECT
   ), 2) AS avg_duration, --Exclude durations > 24 hours
   ROUND(AVG(distance_meters), 2) AS avg_distance
 FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
-GROUP BY day_of_week, member_casual
-ORDER BY day_of_week, member_casual;
+GROUP BY member_casual, day_of_week
+ORDER BY member_casual, day_of_week;
 ```
+
+NOTE: In this section and the last section, I should have presented the count as a percent of total rides  
+from that user type. It would be much easier to identify differences in proportion between the two groups. I won't 
+replace or repeat the queries since I already identified the relationships and don't need to waste the data 
+processing capacity. Moving forward I will use percent of total to simplify things.
 
 | member_casual | day_of_week | ct     | avg_duration | avg_distance | avg_velocity  |
 |---------------|-------------|--------|--------------|--------------|---------------|
@@ -1173,6 +1195,9 @@ WHERE day_of_week = 1 OR day_of_week = 7 --Weeknds only
 GROUP BY member_casual, time_of_day
 ORDER BY member_casual, time_of_day;
 ```
+
+NOTE: I need to spend some time practicing this SUM() OVER() pattern for percent. Had to reference my 
+earlier notes to make sure I did it correctly.
 
 | Time Band Name | Time Range |
 |----------------|------------|
@@ -1315,6 +1340,7 @@ SELECT
     station_id,
     COUNT(*) AS num_rides,
     DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+    -- Dense rank to avoid ties
 FROM (
     SELECT member_casual, start_station_id AS station_id
     FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
@@ -1363,6 +1389,7 @@ WITH all_rk AS (
     station_id,
     COUNT(*) AS num_rides,
     DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+    -- Dense rank to avoid ties
   FROM (
     SELECT member_casual, start_station_id AS station_id
     FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
@@ -1384,7 +1411,7 @@ split_rk AS (
     MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
   FROM all_rk
   GROUP BY station_id
-) --Split the member and casual station ranks so both can be displayed
+) --Pivot so that casual and member rank/rides are their own columns
 
 SELECT --Build Casual Top 10 List
   'Casual Top 10' as list,
@@ -1457,6 +1484,7 @@ all_rk AS (
     station_id,
     COUNT(*) AS num_rides,
     DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) AS station_rk
+    -- Dense rank to avoid ties
   FROM src
   GROUP BY member_casual, station_id
 ), --Build the full list of casual and member ranks
@@ -1470,7 +1498,7 @@ split_rk AS (
     MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
   FROM all_rk
   GROUP BY station_id
-), --Split the member and casual station ranks so both can be displayed
+), --Pivot so that casual and member rank/rides are their own columns
 
 geo AS (
   SELECT
@@ -1526,9 +1554,20 @@ ORDER BY mem_cas_ratio DESC --Highest difference first;
 | CHI00313   | 41.8915 | -87.6268 | 15        | 18575        | 34        | 25669        | 1.38           |
 | CHI01677   | 41.884  | -87.6247 | 14        | 18674        | 44        | 23435        | 1.25           |
 
-These 24 stations have highest potential for out-of-home (OOH) marketing ROI. They are high volume for both members and casuals but are still member dominated. Many of the casuals passing through these station are using the bikes similarly to members. Only two stations from the member top 10 list are not indluded, 5th place CHI00509 and 9th place CHI01091. In both cases, these stations were not popular enough with casuals to satisfy the criteria for high ROI. This table was downloaded as a csv with the intention of using it to create a map of high ROI stations.
+These 24 stations have highest potential for out-of-home (OOH) marketing ROI. The stations needed to be high 
+volume for both members and casuals so I know that there are plenty of casuals for conversion but members also 
+use it extensively. I decided to add the requirement that the station have a higher volume of members than 
+casuals to limit the selection to where casuals are behaving like members. I didn't want to include stations 
+where members are the minority and therefore behaving like casuals.
 
-In order to group the locations of abandoned bikes (those not left at a station) and identify strong areas for expansion, I used BigQuery's ST_CLUSTERDBSCAN function but the millions of points overwhelmed the memory allotment for the task. In response, I used geohashing to pre-aggregate the points and previewed the grids to make sure I would not repeat my previous mistake.
+Only two stations from the member top 10 list are not included, 5th place CHI00509 and 9th place CHI01091. In 
+both cases, these stations were not popular enough with casuals to satisfy the criteria for high ROI. This 
+table was downloaded as a csv with the intention of using it to create a map of high ROI stations.
+
+In order to group the locations of abandoned bikes and identify strong areas for expansion that could be used 
+to recruit more casuals, I used BigQuery's ST_CLUSTERDBSCAN function but the millions of points overwhelmed 
+the memory allotment for the task. In response, I used geohashing to pre-aggregate the points and previewed 
+the number of grids to make sure I would not repeat my previous mistake.
 
 ```sql
 --Cluster points into geohash grids to aggregate data before using ST_CLUSTERDBSCAN
@@ -1553,7 +1592,12 @@ HAVING total_rides > 10
 ORDER BY total_rides DESC;
 ```
 
-This revealed 651 grids with 10+ abandoned bikes, nearly 70 grids with 10,000+ abandoned bikes, and 10 with over 50,000 abandoned bikes. Considering these grids are only 38 meters by 19 meters, these volumes seem incredibly unlikely. After reviewing the latitude and longitude, it appears that most of the coordinates were truncated to the hundreths place. This may be common practice for rides ending outside of a station or perhaps a storage/repair warehouse location.
+This revealed 651 grids with 10+ abandoned bikes, nearly 70 grids with 10,000+ abandoned bikes, and 10 with 
+over 50,000 abandoned bikes. Considering these grids are only 38 meters by 19 meters, these volumes seem 
+incredibly unlikely. After reviewing the latitude and longitude, it appears that most of the coordinates were 
+truncated to the hundreths place. This may be common practice for rides ending outside of a station or perhaps 
+at a storage/repair warehouse location. It is also possible that temporary, unnamed stations were set up for 
+major events that only lasted a short time.
 
 ```sql
 --Cluster points into geohash grids to aggregate data before using ST_CLUSTERDBSCAN
@@ -1577,4 +1621,6 @@ HAVING unique_gps_points > 3 --Need the geohash grid to contain different coordi
 ORDER BY total_rides DESC;
 ```
 
-Filtering for any grids that have at least 3 unique coordinates gave no results, so the data is not detailed enough to identify new station location possibilities.
+Filtering for any grids that have at least 3 unique coordinates gave no results. Given that coordinates rounded 
+to 2 decimals creates grids approximately one square kilometer in area and there is unrealistically large volume 
+in small areas, the data is not detailed enough to identify new station possibilities.
