@@ -307,11 +307,15 @@ CREATE OR REPLACE TABLE `ride-share-500415.Ride_Share_Marketing_Analysis.raw_com
 );
 ```
 
+I chose to use CREATE OR REPLACE TABLE over UPDATE for two main reasons. First, on large tables in BigQuery, 
+CREATE OR REPLACE is more efficient than UPDATE. Second, in order to use DML in Big Query you have to link a 
+payment option and I would rather avoid that if possible.
+
 ### 3.4 Checking Station Names and Ids
 
 I also checked start_station_name, start_station_id, end_station_name, and end_station_id to make sure that there 
 were no misspellings in the station names and that a station name always corresponded to the same station id. I 
-downloaded the results of the two queries that used DISTINCT as Google Sheets to use the filtering in place function 
+downloaded the results of the following two queries and uploaded them to Google Sheets to use the filtering in place function 
 to more easily identify where two station names corresponded to the same station id.
 
 ```sql
@@ -607,7 +611,7 @@ stops at 1499 minutes and the ride automatically ends if the bike has not alread
 
 The large number of rides that lasted betweeon 0 and 2 minutes was surprising. I included that category 
 because I have seen people try out a similar company's product and decide that they did not like it without 
-traveling anywhere. I expected several rides to fall under that category but over 250,000 was significantly 
+traveling anywhere. I expected several rides to fall under that category but over 120,000 was significantly 
 higher than expected.
 
 ```sql
@@ -627,6 +631,11 @@ FROM time_data
 WHERE ride_duration > 0 AND ride_duration < 2
   AND start_station_id != end_station_id;
 ```
+
+NOTE: I have since learned that if either start or end station is null above filter evaluates as false and 
+excludes them even though the records don't match. This means my data cleaning was not as thorough as intended 
+and is something to note for the future. COALESCE(start_station_id, 'A') != COALESCE(end_station_id, 'B') 
+solves this my subsituting a string for any nulls.
 
 57,067 rides had a different start and end station despite the trip length being between 0 and 2 minutes.
 
@@ -1624,3 +1633,94 @@ ORDER BY total_rides DESC;
 Filtering for any grids that have at least 3 unique coordinates gave no results. Given that coordinates rounded 
 to 2 decimals creates grids approximately one square kilometer in area and there is unrealistically large volume 
 in small areas, the data is not detailed enough to identify new station possibilities.
+
+### 4.7 Summary/Notable Insights
+
+Marketing should focus on targeting casuals that take rides:
+
+1) with shorter durations
+   - Especially May-September where the casual duration is highest   - 
+2) during weekdays
+   - Heavy focus on rides between 6-9 am time frame which is dominated
+   - Slight focus on the 4-6 pm time frame which is used heavy by both groups
+3) during the Winter
+   - Slight focus on classic bike rides which are used more commonly by members during Winter
+4) from/to stations that fall into member dominated areas
+
+A major finding was that members are very consistent with their usage as a group. If I were able to track specific 
+individuals, I would want to identify and target any casuals that make consistent use of the service.
+
+The marketing campaign should be biphasic. Phase 1 runs between May and August when there are more casuals active even though they are not displaying "member-like" behavior for the most part. During this phase, we should primarily target the users behaving most like members and emphasize the potential savings at even light use for unlikely converts. Phase 2 runs between December and February when there is low casual activity but it is much more consistent with member behavior.
+
+In both phases, we should combine advertising through the app and OOH marketing at key stations to maximize exposure.
+
+---
+
+## Step 5: Share
+
+### 5.1 Data Point Aggregation
+
+The casual and member geographic heatmaps were initially created with the raw data but the volume of points created 
+extreme lag. In response, I aggregated on latitude and longitude rounded to 4 decimal points to reduce the number of 
+unique points. I also grouped months into seasons (reduced the multiplier from 12x to 4x) and days of the week into 
+weekday/weekend (reduced the multiplier from 7x to 2x) to keep the maps filterable without multiplying the number of 
+points unnecessarily. This decreased the number of points from ~11 million (start and stop for each ride) down to 
+62,411 and solved the lag issue.
+
+```sql
+SELECT --Build list of start points
+  'start' AS pt_type,
+  ROUND(start_lat, 4) AS lat, --rounded to group points together
+  ROUND(start_lng , 4) AS lng, --rounded to group points together
+  member_casual,
+  CASE WHEN month BETWEEN 3 AND 5 THEN 'Spring'
+    WHEN month BETWEEN 6 AND 8 THEN 'Summer'
+    WHEN month BETWEEN 9 AND 11 THEN 'Winter'
+    ELSE 'Fall'
+  END AS geo_season, --Reduced number of aggregated points from 12x to 4x
+  CASE WHEN day_of_week BETWEEN 2 AND 6 THEN 'Weekday'
+    ELSE 'Weekend'
+  END AS day_type, --Reduced number of aggregated points from 7x to 2x
+  rideable_type,
+  COUNT(*) AS num_rides --Keeps the intensity in the heatmap
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY 1,2,3,4,5,6,7
+HAVING COUNT(*) > 5
+UNION ALL
+SELECT --Build list of end points
+  'end' AS pt_type,
+  ROUND(end_lat, 4) AS lat, --rounded to group points together
+  ROUND(end_lng , 4) AS lng, --rounded to group points together
+  member_casual,
+  CASE WHEN month BETWEEN 3 AND 5 THEN 'Spring'
+    WHEN month BETWEEN 6 AND 8 THEN 'Summer'
+    WHEN month BETWEEN 9 AND 11 THEN 'Winter'
+    ELSE 'Fall'
+  END AS geo_season, --Reduced number of aggregated points from 12x to 4x
+  CASE WHEN day_of_week BETWEEN 2 AND 6 THEN 'Weekday'
+    ELSE 'Weekend'
+  END AS day_type, --Reduced number of aggregated points from 7x to 2x
+  rideable_type,
+  COUNT(*) AS num_rides --Keeps the intensity in the heatmap
+FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
+GROUP BY 1,2,3,4,5,6,7
+HAVING COUNT(*) > 5 --Drops some of the background noise;
+```
+
+### 5.2 Final Products
+
+NOT PUBLISHED ONLINE YET. NEED TO FIGURE OUT HOW. DO I NEED TO UPLOAD THE DATASETS AS WELL?
+
+Link to Dashboard
+Link to Story
+
+### 5.3 Individual Charts
+
+Heatmap and other charts individually
+
+---
+
+## Step 6: Act
+
+### 6.1 Key Differences
+
