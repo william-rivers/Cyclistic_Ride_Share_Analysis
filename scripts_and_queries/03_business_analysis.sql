@@ -294,6 +294,7 @@ SELECT
     station_id,
     COUNT(*) AS num_rides,
     DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+    -- Dense rank to avoid ties
 FROM (
     SELECT member_casual, start_station_id AS station_id
     FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
@@ -315,6 +316,7 @@ WITH all_rk AS (
     station_id,
     COUNT(*) AS num_rides,
     DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) as station_rk
+    -- Dense rank to avoid ties
   FROM (
     SELECT member_casual, start_station_id AS station_id
     FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
@@ -336,7 +338,7 @@ split_rk AS (
     MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
   FROM all_rk
   GROUP BY station_id
-) --Split the member and casual station ranks so both can be displayed
+) --Pivot so that casual and member rank/rides are their own columns
 
 SELECT --Build Casual Top 10 List
   'Casual Top 10' as list,
@@ -381,6 +383,7 @@ all_rk AS (
     station_id,
     COUNT(*) AS num_rides,
     DENSE_RANK() OVER(PARTITION BY member_casual ORDER BY COUNT(*) DESC) AS station_rk
+    -- Dense rank to avoid ties
   FROM src
   GROUP BY member_casual, station_id
 ), --Build the full list of casual and member ranks
@@ -394,7 +397,7 @@ split_rk AS (
     MAX(CASE WHEN member_casual = 'member' THEN num_rides END) AS member_rides,
   FROM all_rk
   GROUP BY station_id
-), --Split the member and casual station ranks so both can be displayed
+), --Pivot so that casual and member rank/rides are their own columns
 
 geo AS (
   SELECT
