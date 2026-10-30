@@ -428,6 +428,7 @@ ORDER BY mem_cas_ratio DESC --Highest difference first;
 
 
 --STEP 7: Aggregate points for creating heatmaps of activity
+  
 --Initially attempted without aggregation and heatmap required > 1 min load time
 SELECT --Build list of start points
   'start' AS pt_type,
