@@ -184,8 +184,8 @@ SELECT
     CASE WHEN ride_duration_minutes <= 1440 THEN avg_velocity_m_per_s END
   ), 2) AS avg_velocity --Exclude durations > 24 hours
 FROM `ride-share-500415.Ride_Share_Marketing_Analysis.cleaned_combined_ride_share`
-GROUP BY day_of_week, member_casual
-ORDER BY day_of_week, member_casual;
+GROUP BY member_casual, day_of_week
+ORDER BY member_casual, day_of_week;
 
 
 
